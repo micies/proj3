@@ -15,6 +15,7 @@
 #define FREE 0
 #define TAKEN 1
 
+
 int *bitmap = NULL; //initialized when mount
 
 struct fs_superblock {
@@ -75,7 +76,42 @@ void build_bitmap(){
 //an attempt to format an already-mounted disk should do nothing and return failure
 int fs_format()
 {
-	return 0;
+	//return fail if already mounted
+	
+	if(!fs_mount()){
+		printf("disk is already mounted\n");
+		return 0;
+	}
+	int nblocks = disk_size();
+	
+	//clear all the data existed in blocks
+	for(int i = 0; i < nblocks; i++){
+		char temp_data[DISK_BLOCK_SIZE];
+		disk_read(i, temp_data);
+		temp_data[0] = (int)0;
+	}
+	
+	// initialize super block
+	char data[DISK_BLOCK_SIZE];
+	//set nblocks
+	data[4] = nblocks;
+	//set ninode block
+	int inodes = (int)(nblocks*0.1) + ((nblocks%10 == 0) ? 0 : 1) + 1;
+	data[8] = inodes;
+	disk_write(0, data);
+
+	//set aside ten percent blocks as inode block
+	// bit map should obey the rule that the first block is for super block
+	//and the first 10% blocks are used for inodes
+	for(int i = 0; i < inodes - 1; i++){
+		char temp_data[DISK_BLOCK_SIZE];
+		temp_data[0] = (int)1;
+		temp_data[4] = (int)8;
+		disk_write(i+1, temp_data);
+	}
+
+	//block.super.ninodeblocks = 
+	return 1;
 }
 
 //Scan a mounted filesystem and report on how the inodes and blocks are organized
