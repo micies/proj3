@@ -87,8 +87,8 @@ int fs_format()
 	//clear all the data existed in blocks
 	for(int i = 0; i < nblocks; i++){
 		char temp_data[DISK_BLOCK_SIZE];
-		disk_read(i, temp_data);
 		temp_data[0] = (int)0;
+		disk_write(i, temp_data);
 	}
 	
 	// initialize super block
