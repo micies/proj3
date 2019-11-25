@@ -45,9 +45,51 @@ void fs_debug()
 	disk_read(0,block.data);
 
 	printf("superblock:\n");
-	printf("    %d blocks\n",block.super.nblocks);
-	printf("    %d inode blocks\n",block.super.ninodeblocks);
-	printf("    %d inodes\n",block.super.ninodes);
+	if (block.super.magic == FS_MAGIC){
+		printf("    magic number is valid\n");
+	}
+	else {
+		printf("    magic number is not valid\n");
+	}
+	printf("    %d blocks on disk\n",block.super.nblocks);
+	printf("    %d blocks for inodes\n",block.super.ninodeblocks);
+	printf("    %d inodes toal\n",block.super.ninodes);
+
+	int ninodeblocks = block.super.ninodeblocks;
+	if (ninodeblocks < 0){return;}
+	for (int i = 0; i< ninodeblocks; i++){ // each inode block
+		disk_read(i+1,block.data);
+		for (int j = 0; j < INODES_PER_BLOCK; j++){ // each inode
+			struct fs_inode inode = block.inode[j];
+			if (!inode.isvalid){
+				//printf("inode.isvalid %d\n", inode.isvalid);
+				continue;
+			}
+			printf("inode %d:\n", j+i*INODES_PER_BLOCK);
+			printf("    size: %d bytes\n",fs_getsize(j+i*INODES_PER_BLOCK));
+			printf("    direct blocks: ");
+			for (int k = 0;k<POINTERS_PER_INODE; k++){
+				int pointedblock = inode.direct[k];
+				if (pointedblock != 0){
+					printf("%d ", pointedblock);
+				}
+			}
+			printf("\n");
+
+			if (!inode.indirect){continue;}
+			printf("    indirect block: %d\n", inode.indirect);
+			printf("    indirect data blocks: "); 
+			union fs_block indirectblock;
+			disk_read(inode.indirect, indirectblock.data);
+			for (int l = 0; l < POINTERS_PER_BLOCK; l++){
+                        	if (indirectblock.pointers[l]!=0){
+					printf("%d ",indirectblock.pointers[l]);
+				}
+			
+			}
+			printf("\n");	
+		}
+	}
 }
 
 int fs_mount()
@@ -67,7 +109,26 @@ int fs_delete( int inumber )
 
 int fs_getsize( int inumber )
 {
-	return -1;
+	int blocknum = inumber/INODES_PER_BLOCK;
+	int inodenum = inumber%INODES_PER_BLOCK;
+	union fs_block block;
+
+	disk_read(0,block.data);
+	if (inumber>block.super.ninodes){
+		printf("Please enter a number within 1 ~ ninodes");
+		return -1;
+	}
+	else if (inumber==0){
+		printf("Please enter a number within 1 ~ ninodes");
+                return -1;
+	}
+	
+	// read a inode
+	disk_read(blocknum+1, block.data);
+	struct fs_inode inode = block.inode[inodenum];	
+	return inode.size;
+
+	//return -1;
 }
 
 int fs_read( int inumber, char *data, int length, int offset )
