@@ -11,6 +11,12 @@
 #define INODES_PER_BLOCK   128
 #define POINTERS_PER_INODE 5
 #define POINTERS_PER_BLOCK 1024
+#define BLOCK_SIZE 4
+#define FREE 0
+#define TAKEN 1
+
+
+int *bitmap = NULL; //initialized when mount
 
 struct fs_superblock {
 	int magic;
@@ -33,11 +39,82 @@ union fs_block {
 	char data[DISK_BLOCK_SIZE];
 };
 
-int fs_format()
-{
-	return 0;
+void build_bitmap(){
+	union fs_block block;
+	disk_read(0,block.data);
+	int ninodeblocks = block.super.ninodeblocks;
+	int nblocks = block.super.nblocks;
+	int ninodes = block.super.ninodes;
+	int i,j,k;
+	int fileblocks; // file_size/block_size
+	struct fs_inode inode;
+	union fs_block datablock;
+	bitmap = (int *)malloc(nblocks);
+	memset(bitmap,0,nblocks);
+	bitmap[0] = TAKEN;
+	for(i = 1; i <= ninodeblocks; i++){
+		bitmap[i] = TAKEN;
+		disk_read(i,block.data);
+		for(j = 0; j < INODES_PER_BLOCK; j++){
+			inode = block.inode[j];
+			if(inode.isvalid){
+				fileblocks = inode.size / BLOCK_SIZE;
+				for(k = 0; k < POINTERS_PER_INODE; k++){
+					bitmap[inode.direct[k]] = TAKEN;
+				}
+				if(fileblocks > POINTERS_PER_INODE){
+					disk_read(inode.indirect,datablock.data);
+					for(k = 0; k < (fileblocks-POINTERS_PER_INODE); k++){
+						bitmap[datablock.pointers[k]] = TAKEN;
+					}
+				}
+			}
+		}
+	}
 }
 
+//an attempt to format an already-mounted disk should do nothing and return failure
+int fs_format()
+{
+	//return fail if already mounted
+	
+	if(!fs_mount()){
+		printf("disk is already mounted\n");
+		return 0;
+	}
+	int nblocks = disk_size();
+	
+	//clear all the data existed in blocks
+	for(int i = 0; i < nblocks; i++){
+		char temp_data[DISK_BLOCK_SIZE];
+		temp_data[0] = (int)0;
+		disk_write(i, temp_data);
+	}
+	
+	// initialize super block
+	char data[DISK_BLOCK_SIZE];
+	//set nblocks
+	data[4] = nblocks;
+	//set ninode block
+	int inodes = (int)(nblocks*0.1) + ((nblocks%10 == 0) ? 0 : 1) + 1;
+	data[8] = inodes;
+	disk_write(0, data);
+
+	//set aside ten percent blocks as inode block
+	// bit map should obey the rule that the first block is for super block
+	//and the first 10% blocks are used for inodes
+	for(int i = 0; i < inodes - 1; i++){
+		char temp_data[DISK_BLOCK_SIZE];
+		temp_data[0] = (int)1;
+		temp_data[4] = (int)8;
+		disk_write(i+1, temp_data);
+	}
+
+	//block.super.ninodeblocks = 
+	return 1;
+}
+
+//Scan a mounted filesystem and report on how the inodes and blocks are organized
 void fs_debug()
 {
 	union fs_block block;
@@ -92,8 +169,19 @@ void fs_debug()
 	}
 }
 
+//build a new free block bitmap
 int fs_mount()
 {
+	union fs_block block;
+	disk_read(0,block.data);
+	if(block.super.magic != FS_MAGIC){
+		int nblocks = block.super.nblocks;		
+		bitmap = (int *)malloc(nblocks);
+		memset(bitmap,0,nblocks);
+		block.super.magic = FS_MAGIC;
+		return 1;
+	}
+	printf("It has already been mounted!\n");
 	return 0;
 }
 
