@@ -85,12 +85,7 @@ int fs_format()
 	int nblocks = disk_size();
 	
 	//clear all the data existed in blocks
-	for(int i = 0; i < nblocks; i++){
-		char temp_data[DISK_BLOCK_SIZE];
-		temp_data[0] = (int)0;
-		disk_write(i, temp_data);
-	}
-	
+
 	// initialize super block
 	char data[DISK_BLOCK_SIZE];
 	//set nblocks
@@ -105,12 +100,12 @@ int fs_format()
 	//and the first 10% blocks are used for inodes
 	for(int i = 0; i < inodes - 1; i++){
 		char temp_data[DISK_BLOCK_SIZE];
-		temp_data[0] = (int)1;
+		temp_data[0] = (int)0;
 		temp_data[4] = (int)8;
 		disk_write(i+1, temp_data);
 	}
 
-	//block.super.ninodeblocks = 
+	//block.super.ninodeblocks
 	return 1;
 }
 
