@@ -287,19 +287,23 @@ int fs_read( int inumber, char *data, int length, int offset )
 	int inodenum = (inumber -1)%INODES_PER_BLOCK;
 	union fs_block block;
 
+
 	disk_read(0,block.data);
 	if(block.super.magic == FS_MAGIC){
 		union fs_block block;
 		disk_read(blocknum, block.data);
 		struct fs_inode inode = block.inode[inodenum];
 		if(inode.isvalid){
+			//check if input is valid
+			if(inode.size < offset)
+				return 0;
 			int copysize = (inode.size - offset  < length) ? inode.size - offset : length;
 			if(copysize > 0){
 				union fs_block indirect;
 				disk_read(inode.indirect, indirect.data);
 				int blockbegin = offset / BLOCK_SIZE;
 				int blockoffset = offset % BLOCK_SIZE;
-				int datablocknum = (copysize - (BLOCK_SIZE - offset)) / BLOCK_SIZE;
+				int datablocknum = (copysize > (BLOCK_SIZE - offset)) ? (copysize - (BLOCK_SIZE - offset)) / BLOCK_SIZE : 0;
 				int first_length = BLOCK_SIZE - blockoffset;	
 				int last = (copysize - first_length) % BLOCK_SIZE;
 				if(last != 0){
@@ -362,9 +366,12 @@ int fs_write( int inumber, const char *data, int length, int offset )
 		disk_read(blocknum, block.data);
 		struct fs_inode inode = block.inode[inodenum];
 		if(inode.isvalid){
+			//check the input
+			if(inode.size < offset)
+				return 0;
 			int blockbegin = offset / BLOCK_SIZE;
 			int blockoffset = offset % BLOCK_SIZE;
-			int datablocknum = (length - (BLOCK_SIZE - offset)) / BLOCK_SIZE;
+			int datablocknum = (length > (BLOCK_SIZE - offset))?(length - (BLOCK_SIZE - offset)) / BLOCK_SIZE : 0;
 			int first_length = BLOCK_SIZE - blockoffset;	
 			int last = (length - first_length) % BLOCK_SIZE;
 	
