@@ -194,6 +194,8 @@ int fs_create()
 	if(block.super.magic != FS_MAGIC){
 		return -1;
 	}
+	if(bitmap == NULL)
+		build_bitmap();
 	for(int i = 0; i < block.super.ninodeblocks; i++){
 		union fs_block tempblock;
 		disk_read(i+1, tempblock.data);
@@ -225,6 +227,8 @@ int fs_delete( int inumber)
 	inumber == 0){
 		return 0;
 	}
+	if(bitmap == NULL)
+		build_bitmap();
 
 	//get corresponding inode
 	union fs_block block;
@@ -267,6 +271,8 @@ int fs_getsize( int inumber )
 		printf("Please enter a number within 1 ~ ninodes!");
 		return -1;
 	}
+	if(bitmap == NULL)
+		build_bitmap();
 	
 	// read a inode
 	disk_read(blocknum, block.data);
@@ -290,6 +296,8 @@ int fs_read( int inumber, char *data, int length, int offset )
 
 	disk_read(0,block.data);
 	if(block.super.magic == FS_MAGIC){
+		if(bitmap == NULL)
+			build_bitmap();
 		union fs_block block;
 		disk_read(blocknum, block.data);
 		struct fs_inode inode = block.inode[inodenum];
@@ -338,6 +346,8 @@ int fs_read( int inumber, char *data, int length, int offset )
 }
 
 int findFree(){
+	if(bitmap == NULL)
+		build_bitmap();
 	union fs_block block;
 	disk_read(0, block.data);
 	int nblocks = block.super.nblocks;
@@ -362,6 +372,8 @@ int fs_write( int inumber, const char *data, int length, int offset )
 
 	disk_read(0,block.data);
 	if(block.super.magic == FS_MAGIC){
+		if(bitmap == NULL)
+			build_bitmap();
 		union fs_block block;
 		disk_read(blocknum, block.data);
 		struct fs_inode inode = block.inode[inodenum];
