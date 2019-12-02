@@ -90,7 +90,7 @@ int fs_format()
 	//set nblocks
 	data.super.nblocks = nblocks;
 	//set ninode block
-	int inodes = (int)(nblocks*0.1) + ((nblocks%10 == 0) ? 0 : 1) + 1;
+	int inodes = (int)(nblocks*0.1) + ((nblocks%10 == 0) ? 0 : 1);
 	data.super.ninodeblocks = inodes;
 	data.super.ninodes = 0;
 	disk_write(0, data.data);
@@ -231,14 +231,18 @@ int fs_delete( int inumber)
 	disk_read(blocknum, block.data);
 	struct fs_inode inode = block.inode[offset];
 	if(inode.isvalid){
-		int fileblocks = inode.size/BLOCK_SIZE;
+		int fileblocks = inode.size/BLOCK_SIZE + ((inode.size%BLOCK_SIZE == 0)?0:1);
 		for(int i = 0; i < POINTERS_PER_INODE; i++){
+			if(inode.direct[i] == 0)
+				continue;
 			bitmap[inode.direct[i]] = FREE;
 		}
 		if(fileblocks > POINTERS_PER_INODE){
 			union fs_block datablock;
 			disk_read(inode.indirect, datablock.data);
 			for(int k = 0; k < (fileblocks - POINTERS_PER_INODE); k++){
+				if(inode.direct[k] == 0)
+					continue;
 				bitmap[datablock.pointers[k]] = FREE;
 			}
 		}
