@@ -58,6 +58,9 @@ void build_bitmap(){
 			inode = block.inode[j];
 			if(inode.isvalid){
 				fileblocks = inode.size / BLOCK_SIZE;
+				if(inode.size % BLOCK_SIZE){
+					fileblocks++;
+				}
 				for(k = 0; k < POINTERS_PER_INODE; k++){
 					bitmap[inode.direct[k]] = TAKEN;
 				}
