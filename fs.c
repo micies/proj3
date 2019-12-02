@@ -48,7 +48,7 @@ void build_bitmap(){
 	int fileblocks; // file_size/block_size
 	struct fs_inode inode;
 	union fs_block datablock;
-	bitmap = (int *)malloc(nblocks);
+	bitmap = (int *)malloc(nblocks * sizeof(int));
 	memset(bitmap,0,nblocks);
 	bitmap[0] = TAKEN;
 	for(i = 1; i <= ninodeblocks; i++){
@@ -79,8 +79,9 @@ void build_bitmap(){
 int fs_format()
 {
 	//return fail if already mounted
-	
-	if(!fs_mount()){
+	union fs_block superblock;
+	disk_read(0,superblock.data);
+	if(superblock.super.magic == FS_MAGIC){
 		printf("disk is already mounted\n");
 		return 0;
 	}
@@ -179,7 +180,7 @@ int fs_mount()
 	disk_read(0,block.data);
 	if(block.super.magic != FS_MAGIC){
 		int nblocks = block.super.nblocks;		
-		bitmap = (int *)malloc(nblocks);
+		bitmap = (int *)malloc(nblocks * sizeof(int));
 		memset(bitmap,0,nblocks);
 		block.super.magic = FS_MAGIC;
 		disk_write(0, block.data);
