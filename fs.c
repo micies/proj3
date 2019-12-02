@@ -11,7 +11,7 @@
 #define INODES_PER_BLOCK   128
 #define POINTERS_PER_INODE 5
 #define POINTERS_PER_BLOCK 1024
-#define BLOCK_SIZE 4
+#define BLOCK_SIZE 4096
 #define FREE 0
 #define TAKEN 1
 
@@ -87,22 +87,28 @@ int fs_format()
 	//clear all the data existed in blocks
 
 	// initialize super block
-	char data[DISK_BLOCK_SIZE];
+	union fs_block data;
 	//set nblocks
-	data[4] = nblocks;
+	data.super.nblocks = nblocks;
 	//set ninode block
 	int inodes = (int)(nblocks*0.1) + ((nblocks%10 == 0) ? 0 : 1) + 1;
-	data[8] = inodes;
-	disk_write(0, data);
+	data.super.ninodeblocks = inodes;
+	data.super.ninodes = 0;
+	disk_write(0, data.data);
 
 	//set aside ten percent blocks as inode block
 	// bit map should obey the rule that the first block is for super block
 	//and the first 10% blocks are used for inodes
 	for(int i = 0; i < inodes - 1; i++){
-		char temp_data[DISK_BLOCK_SIZE];
-		temp_data[0] = (int)0;
-		temp_data[4] = (int)8;
-		disk_write(i+1, temp_data);
+		union fs_block block;
+		for(int j = 0; j < INODES_PER_BLOCK; j++){
+			block.inode[j].isvalid = 0;
+			block.inode[j].size = 0;
+			// clear all the pointer(direct & indrect)
+			memset(block.inode[j].direct, 0, POINTERS_PER_INODE * 4);
+			block.inode[j].indirect = 0;
+		}
+		disk_write(i+1, block.data);
 	}
 
 	//block.super.ninodeblocks
@@ -137,8 +143,8 @@ void fs_debug()
 				//printf("inode.isvalid %d\n", inode.isvalid);
 				continue;
 			}
-			printf("inode %d:\n", j+i*INODES_PER_BLOCK);
-			printf("    size: %d bytes\n",fs_getsize(j+i*INODES_PER_BLOCK));
+			printf("inode %d:\n", j+i*INODES_PER_BLOCK + 1);
+			printf("    size: %d bytes\n",fs_getsize(j+i*INODES_PER_BLOCK + 1));
 			printf("    direct blocks: ");
 			for (int k = 0;k<POINTERS_PER_INODE; k++){
 				int pointedblock = inode.direct[k];
@@ -174,6 +180,7 @@ int fs_mount()
 		bitmap = (int *)malloc(nblocks);
 		memset(bitmap,0,nblocks);
 		block.super.magic = FS_MAGIC;
+		disk_write(0, block.data);
 		return 1;
 	}
 	printf("It has already been mounted!\n");
@@ -182,44 +189,221 @@ int fs_mount()
 
 int fs_create()
 {
+	// search through the top 10% blocks finding the first avalible inode
+	union fs_block block;
+	disk_read(0, block.data);
+	if(block.super.magic != FS_MAGIC){
+		return -1;
+	}
+	for(int i = 0; i < block.super.ninodeblocks; i++){
+		union fs_block tempblock;
+		disk_read(i+1, tempblock.data);
+		for(int j = 0; j < INODES_PER_BLOCK; j++){
+			if(tempblock.inode[j].isvalid == 0){
+				tempblock.inode[j].isvalid = 1;
+				tempblock.inode[j].size = 0;
+				disk_write(i+1, tempblock.data);
+				// update the total number of inodes
+				block.super.ninodes++;
+				disk_write(0, block.data);
+				return i * INODES_PER_BLOCK + j + 1;
+			}
+		}
+	}
 	return -1;
 }
 
-int fs_delete( int inumber )
+int fs_delete( int inumber)
 {
-	return 0;
+	int blocknum = (inumber - 1) / INODES_PER_BLOCK + 1;
+	int offset = (inumber-1) % INODES_PER_BLOCK;
+	
+	//check if the input inumber if valid
+	union fs_block superblock;
+	disk_read(0, superblock.data);
+	if(superblock.super.magic != FS_MAGIC ||
+	inumber > superblock.super.ninodes ||
+	inumber == 0){
+		return 0;
+	}
+
+	//get corresponding inode
+	union fs_block block;
+	disk_read(blocknum, block.data);
+	struct fs_inode inode = block.inode[offset];
+	if(inode.isvalid){
+		int fileblocks = inode.size/BLOCK_SIZE;
+		for(int i = 0; i < POINTERS_PER_INODE; i++){
+			bitmap[inode.direct[i]] = FREE;
+		}
+		if(fileblocks > POINTERS_PER_INODE){
+			union fs_block datablock;
+			disk_read(inode.indirect, datablock.data);
+			for(int k = 0; k < (fileblocks - POINTERS_PER_INODE); k++){
+				bitmap[datablock.pointers[k]] = FREE;
+			}
+		}
+		block.inode[offset].isvalid = 0;
+		block.inode[offset].size = 0;
+		memset(block.inode[offset].direct, 0, POINTERS_PER_INODE * 4);
+		block.inode[offset].indirect = 0;
+		disk_write(blocknum, block.data);
+	}
+	return 1;
 }
+
 
 int fs_getsize( int inumber )
 {
-	int blocknum = inumber/INODES_PER_BLOCK;
-	int inodenum = inumber%INODES_PER_BLOCK;
+	int blocknum = (inumber - 1) /INODES_PER_BLOCK + 1;
+	int inodenum = (inumber -1)%INODES_PER_BLOCK;
 	union fs_block block;
 
 	disk_read(0,block.data);
-	if (inumber>block.super.ninodes){
-		printf("Please enter a number within 1 ~ ninodes");
+	if (block.super.magic != FS_MAGIC){
+		printf("Please enter a number within 1 ~ ninodes!");
 		return -1;
-	}
-	else if (inumber==0){
-		printf("Please enter a number within 1 ~ ninodes");
-                return -1;
 	}
 	
 	// read a inode
-	disk_read(blocknum+1, block.data);
+	disk_read(blocknum, block.data);
+	if(block.inode[inodenum].isvalid == 0){
+		printf("inumber is not valid. Not create yet.\n");
+		return -1;
+	}
 	struct fs_inode inode = block.inode[inodenum];	
 	return inode.size;
 
 	//return -1;
 }
 
+
 int fs_read( int inumber, char *data, int length, int offset )
-{
+{	
+	int blocknum = (inumber - 1) /INODES_PER_BLOCK + 1;
+	int inodenum = (inumber -1)%INODES_PER_BLOCK;
+	union fs_block block;
+
+	disk_read(0,block.data);
+	if(block.super.magic == FS_MAGIC){
+		union fs_block block;
+		disk_read(blocknum, block.data);
+		struct fs_inode inode = block.inode[inodenum];
+		if(inode.isvalid){
+			int copysize = (inode.size - offset  < length) ? inode.size - offset : length;
+			if(copysize > 0){
+				union fs_block indirect;
+				disk_read(inode.indirect, indirect.data);
+				int blockbegin = offset / BLOCK_SIZE;
+				int blockoffset = offset % BLOCK_SIZE;
+				int datablocknum = (copysize - (BLOCK_SIZE - offset)) / BLOCK_SIZE;
+				int first_length = BLOCK_SIZE - blockoffset;	
+				int last = (copysize - first_length) % BLOCK_SIZE;
+				if(last != 0){
+					datablocknum++;
+				}
+				//copy the first number
+				union fs_block datablock;
+				if(blockbegin > POINTERS_PER_INODE)
+					disk_read(inode.direct[blockbegin], datablock.data);
+				else{
+					int tempblocknum = indirect.pointers[blockbegin - POINTERS_PER_INODE];
+					disk_read(tempblocknum, datablock.data);
+				}	
+				memcpy(data, datablock.data, first_length);
+				
+				//copy rest blocks
+				for(int i = 1; i < datablocknum; i++){
+					union fs_block tempblock;
+					if(blockbegin + i < POINTERS_PER_INODE){
+						disk_read(inode.direct[blockbegin + i], tempblock.data);
+					}else{
+						int tempblocknum = indirect.pointers[blockbegin + i - POINTERS_PER_INODE];
+						disk_read(tempblocknum, tempblock.data);
+					}
+					memcpy(data + first_length + BLOCK_SIZE * (i-1), tempblock.data, BLOCK_SIZE);
+				}
+			}
+			return copysize;
+		}
+	}
 	return 0;
+}
+
+int findFree(){
+	union fs_block block;
+	disk_read(0, block.data);
+	int nblocks = block.super.nblocks;
+	for(int i = 0; i < nblocks; i++){
+		if(bitmap[i] == FREE){
+			return i;
+		}
+	}
+	return -1;
 }
 
 int fs_write( int inumber, const char *data, int length, int offset )
 {
+	int blocknum = (inumber - 1) /INODES_PER_BLOCK + 1;
+	int inodenum = (inumber -1)%INODES_PER_BLOCK;
+	union fs_block block;
+
+	disk_read(0,block.data);
+	if(block.super.magic == FS_MAGIC){
+		union fs_block block;
+		disk_read(blocknum, block.data);
+		struct fs_inode inode = block.inode[inodenum];
+		if(inode.isvalid){
+			int blockbegin = offset / BLOCK_SIZE;
+			int blockoffset = offset % BLOCK_SIZE;
+			int datablocknum = (length - (BLOCK_SIZE - offset)) / BLOCK_SIZE;
+			int first_length = BLOCK_SIZE - blockoffset;	
+			int last = (length - first_length) % BLOCK_SIZE;
+			if(last != 0){
+				datablocknum++;
+			}
+			
+			//write the first block
+			union fs_block datablock;
+			int tempblocknum;
+			if(blockbegin > POINTERS_PER_INODE){
+				// allocate indirect pointer
+				if(inode.indirect == 0){
+					int freeblock = findFree();
+					if(freeblock != -1){
+						bitmap[freeblock] = TAKEN;
+						inode.indirect = freeblock;
+						union fs_block indirect;
+						disk_read(inode.indirect, indirect.data);
+						int extrablock = datablocknum + blockbegin + 1 - POINTERS_PER_INODE;
+						
+						// allocate space for data
+						for(int k = 0; k < extrablock; k++){
+							int tempfree = findFree();
+							if(tempfree != -1){
+								bitmap[tempfree] = TAKEN;
+								indirect.pointers[k] = tempfree;
+							}else{
+								indirect.pointers[k] = 0;
+							}
+						}
+						disk_write(inode.indirect, indirect.data);
+						
+					}
+				}
+
+				union fs_block indirect;
+				disk_read(inode.indirect, indirect.data);
+				tempblocknum = indirect.pointers[blockbegin - POINTERS_PER_INODE];
+			}else{
+				tempblocknum = inode.direct[blockbegin];
+			}
+			disk_read(tempblocknum, datablock.data);
+			memcpy(datablock.data + blockoffset, data, first_length);
+			disk_write(inode.direct[blockbegin], datablock.data);
+
+			//write the rest block
+		}
+	}
 	return 0;
 }
