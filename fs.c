@@ -44,7 +44,6 @@ void build_bitmap(){
 	disk_read(0,block.data);
 	int ninodeblocks = block.super.ninodeblocks;
 	int nblocks = block.super.nblocks;
-	int ninodes = block.super.ninodes;
 	int i,j,k;
 	int fileblocks; // file_size/block_size
 	struct fs_inode inode;
@@ -342,11 +341,16 @@ int findFree(){
 	return -1;
 }
 
+int allocate(int inumber, int length){
+	return 0;
+}
+
 int fs_write( int inumber, const char *data, int length, int offset )
 {
 	int blocknum = (inumber - 1) /INODES_PER_BLOCK + 1;
 	int inodenum = (inumber -1)%INODES_PER_BLOCK;
 	union fs_block block;
+	int ret = 0;
 
 	disk_read(0,block.data);
 	if(block.super.magic == FS_MAGIC){
@@ -359,50 +363,100 @@ int fs_write( int inumber, const char *data, int length, int offset )
 			int datablocknum = (length - (BLOCK_SIZE - offset)) / BLOCK_SIZE;
 			int first_length = BLOCK_SIZE - blockoffset;	
 			int last = (length - first_length) % BLOCK_SIZE;
-			if(last != 0){
-				datablocknum++;
+	
+			int directblocknum = datablocknum + blockbegin + 1;
+			for(int i = 0; i < directblocknum; i++){
+				if(inode.direct[i] != 0)
+					continue;
+				int freeblock = findFree();
+				if(freeblock != -1){
+					bitmap[freeblock] = TAKEN;
+					inode.direct[i] = freeblock;
+				}
 			}
 			
+			int extrablock = datablocknum + blockbegin + 1 - POINTERS_PER_INODE;
+			// allocate indirect pointer
+			if(extrablock > 0 && inode.indirect == 0){
+				int freeblock = findFree();
+				if(freeblock != -1){
+					bitmap[freeblock] = TAKEN;
+					inode.indirect = freeblock;
+				}
+			}
+			if(extrablock > 0){
+				union fs_block indirect;
+				disk_read(inode.indirect, indirect.data);
+				// allocate space for data
+				for(int k = 0; k < extrablock; k++){
+					if(indirect.pointers[k] != 0)
+						continue;
+					int tempfree = findFree();
+					if(tempfree != -1){
+						bitmap[tempfree] = TAKEN;
+						indirect.pointers[k] = tempfree;
+					}else{
+						indirect.pointers[k] = 0;
+					}
+				}
+				disk_write(inode.indirect, indirect.data);
+			}
+			
+
 			//write the first block
+			union fs_block indirect;
+			disk_read(inode.indirect, indirect.data);
 			union fs_block datablock;
 			int tempblocknum;
 			if(blockbegin > POINTERS_PER_INODE){
-				// allocate indirect pointer
-				if(inode.indirect == 0){
-					int freeblock = findFree();
-					if(freeblock != -1){
-						bitmap[freeblock] = TAKEN;
-						inode.indirect = freeblock;
-						union fs_block indirect;
-						disk_read(inode.indirect, indirect.data);
-						int extrablock = datablocknum + blockbegin + 1 - POINTERS_PER_INODE;
-						
-						// allocate space for data
-						for(int k = 0; k < extrablock; k++){
-							int tempfree = findFree();
-							if(tempfree != -1){
-								bitmap[tempfree] = TAKEN;
-								indirect.pointers[k] = tempfree;
-							}else{
-								indirect.pointers[k] = 0;
-							}
-						}
-						disk_write(inode.indirect, indirect.data);
-						
-					}
-				}
-
-				union fs_block indirect;
-				disk_read(inode.indirect, indirect.data);
 				tempblocknum = indirect.pointers[blockbegin - POINTERS_PER_INODE];
 			}else{
 				tempblocknum = inode.direct[blockbegin];
 			}
+
+			if(tempblocknum == 0)
+				return ret;
+
 			disk_read(tempblocknum, datablock.data);
 			memcpy(datablock.data + blockoffset, data, first_length);
 			disk_write(inode.direct[blockbegin], datablock.data);
-
+			ret += first_length;
+			
 			//write the rest block
+			for(int i = 0; i < datablocknum; i++){
+				if(blockbegin + i < POINTERS_PER_INODE){
+					if(inode.direct[blockbegin + i] == 0)
+						return ret;
+					disk_write(inode.direct[blockbegin + i], data+first_length + BLOCK_SIZE*(i-1));
+				}else{
+					int tempblocknum = indirect.pointers[blockbegin + i - POINTERS_PER_INODE];
+					if(tempblocknum == 0)
+						return ret;
+					disk_write(tempblocknum, data + first_length + BLOCK_SIZE*(i-1));
+				}
+				ret += BLOCK_SIZE;
+			}
+			
+			if(last != 0){
+				union fs_block tempblock;
+				
+				if(blockbegin + datablocknum < POINTERS_PER_INODE){
+					if(inode.direct[blockbegin + datablocknum] == 0)
+						return ret;
+					disk_read(inode.direct[blockbegin+datablocknum], tempblock.data);
+					memcpy(tempblock.data, data + first_length + BLOCK_SIZE * datablocknum, last);
+					disk_write(inode.direct[blockbegin + datablocknum], tempblock.data);
+				}else{
+					int tempblocknum = indirect.pointers[blockbegin + datablocknum - POINTERS_PER_INODE];
+					if(tempblocknum == 0)
+						return ret;
+					memcpy(tempblock.data, data + first_length + BLOCK_SIZE * datablocknum, last);
+					disk_write(tempblocknum, tempblock.data);
+				}
+				ret += last;
+				
+			}
+
 		}
 	}
 	return 0;
