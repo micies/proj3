@@ -198,7 +198,7 @@ static int do_copyin( const char *filename, int inumber )
 
 	printf("%d bytes copied\n",offset);
 
-	//fclose(file);
+	fclose(file);
 	return 1;
 }
 
@@ -223,6 +223,6 @@ static int do_copyout( int inumber, const char *filename )
 
 	printf("%d bytes copied\n",offset);
 
-	//fclose(file);
+	fclose(file);
 	return 1;
 }
