@@ -65,6 +65,7 @@ int fs_format()
 	data.super.ninodeblocks = inodesblocks;
 	data.super.ninodes = inodesblocks * INODES_PER_BLOCK;
 	data.super.magic = FS_MAGIC;
+	//printf("in format: ninodesblocks: %d ninodes: %d\n",data.super.ninodeblocks, data.super.ninodes);
 	disk_write(0, data.data);
 
 	//set aside ten percent blocks as inode block
@@ -102,7 +103,7 @@ void fs_debug()
 	}
 	printf("    %d blocks on disk\n",block.super.nblocks);
 	printf("    %d blocks for inodes\n",block.super.ninodeblocks);
-	printf("    %d inodes toal\n",block.super.ninodes);
+	printf("    %d inodes total\n",block.super.ninodes);
 
 	int ninodeblocks = block.super.ninodeblocks;
 	if (ninodeblocks < 0){return;}
@@ -201,8 +202,6 @@ int fs_create()
 				tempblock.inode[j].isvalid = 1;
 				tempblock.inode[j].size = 0;
 				disk_write(i+1, tempblock.data);
-				// update the total number of inodes
-				block.super.ninodes++;
 				disk_write(0, block.data);
 				return i * INODES_PER_BLOCK + j + 1;
 			}
