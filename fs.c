@@ -262,6 +262,8 @@ int fs_delete( int inumber)
 		memset(block.inode[offset].direct, 0, POINTERS_PER_INODE * 4);
 		block.inode[offset].indirect = 0;
 		disk_write(blocknum, block.data);
+		superblock.super.ninodes--;
+		disk_write(0, superblock.data);
 	}
 	return 1;
 }
@@ -407,14 +409,12 @@ int fs_write( int inumber, const char *data, int length, int offset )
 			for(int i = 0; i < directblocknum; i++){
 				if(inode.direct[i] != 0)
 					continue;
-				printf("allocate direct block#%d\n", i+1);
 				int freeblock = findFree();
 				if(freeblock != -1){
 					bitmap[freeblock] = TAKEN;
 					inode.direct[i] = freeblock;
 				}
 			}
-			printf("length %d \t offset %d \t copysize %d\n", length, offset, copysize);
 			
 			int extrablock = datablocknum + blockbegin + 1 - POINTERS_PER_INODE;
 			// allocate indirect pointer
@@ -462,7 +462,6 @@ int fs_write( int inumber, const char *data, int length, int offset )
 				disk_write(blocknum, block.data);
 				return ret;
 			}
-			printf("length %d \t offset %d \t copysize %d\n", length, offset, copysize);
 			
 			disk_read(tempblocknum, datablock.data);
 			memcpy(datablock.data + blockoffset, data, first_length);
@@ -471,7 +470,6 @@ int fs_write( int inumber, const char *data, int length, int offset )
 
 			//write the rest block
 			for(int i = 0; i < datablocknum; i++){
-			printf("length %d \t offset %d \t copysize %d\n", length, offset, copysize);
 				if(blockbegin + i < POINTERS_PER_INODE){
 					if(inode.direct[blockbegin + i] == 0){
 						block.inode[inodenum].size += ret;
@@ -486,7 +484,6 @@ int fs_write( int inumber, const char *data, int length, int offset )
 						disk_write(blocknum, block.data);
 						return ret;
 					}
-			printf("length %d \t offset %d \t copysize %d\n", length, offset, copysize);
 					disk_write(tempblocknum, data + first_length + BLOCK_SIZE*(i-1));
 				}
 				ret += BLOCK_SIZE;
