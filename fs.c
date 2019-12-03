@@ -225,11 +225,11 @@ int fs_delete( int inumber)
 		return 0;
 	}
 
-	int blocknum = (inumber - 1)/INODES_PER_BLOCK + 1;
-	int offset = (inumber - 1) % INODES_PER_BLOCK;
+	int blocknum = (inumber - 1) /INODES_PER_BLOCK + 1;
+	int inodenum = (inumber - 1) %INODES_PER_BLOCK;
 	union fs_block block;
 	disk_read(blocknum, block.data);
-	struct fs_inode inode = block.inode[offset];
+	struct fs_inode inode = block.inode[inodenum];
 
 	if(inode.isvalid){
 		int fileblocks = inode.size/BLOCK_SIZE + ((inode.size%BLOCK_SIZE == 0)?0:1);
@@ -247,10 +247,10 @@ int fs_delete( int inumber)
 				bitmap[datablock.pointers[k]] = FREE;
 			}
 		}
-		block.inode[offset].isvalid = 0;
-		block.inode[offset].size = 0;
-		memset(block.inode[offset].direct, 0, POINTERS_PER_INODE * 4);
-		block.inode[offset].indirect = 0;
+		block.inode[inodenum].isvalid = 0;
+		block.inode[inodenum].size = 0;
+		memset(block.inode[inodenum].direct, 0, POINTERS_PER_INODE * 4);
+		block.inode[inodenum].indirect = 0;
 		disk_write(blocknum, block.data);
 		disk_write(0, superblock.data);
 	}
@@ -268,7 +268,7 @@ int fs_getsize( int inumber )
 	}
 
 	int blocknum = (inumber - 1) /INODES_PER_BLOCK + 1;
-	int inodenum = (inumber -1)%INODES_PER_BLOCK;
+	int inodenum = (inumber - 1) %INODES_PER_BLOCK;
 	union fs_block block;
 	disk_read(blocknum, block.data);
 	struct fs_inode inode = block.inode[inodenum];
@@ -293,7 +293,7 @@ int fs_read( int inumber, char *data, int length, int offset )
 		return 0;
 	}
 	int blocknum = (inumber - 1) /INODES_PER_BLOCK + 1;
-	int inodenum = (inumber -1) % INODES_PER_BLOCK;
+	int inodenum = (inumber - 1) %INODES_PER_BLOCK;
 	union fs_block block;
 
 	/*
@@ -402,7 +402,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 	}
 
 	int blocknum = (inumber - 1) /INODES_PER_BLOCK + 1;
-	int inodenum = (inumber -1)%INODES_PER_BLOCK;
+	int inodenum = (inumber - 1) %INODES_PER_BLOCK;
 	union fs_block block;
 	int ret = 0;
 
