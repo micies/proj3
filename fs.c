@@ -18,6 +18,9 @@
 
 int *bitmap = NULL; //initialized when mount
 
+int built = 0;
+int copysize;
+
 struct fs_superblock {
 	int magic;
 	int nblocks;
@@ -38,6 +41,7 @@ union fs_block {
 	int pointers[POINTERS_PER_BLOCK];
 	char data[DISK_BLOCK_SIZE];
 };
+
 
 //an attempt to format an already-mounted disk should do nothing and return failure
 int fs_format()
@@ -176,7 +180,8 @@ int fs_mount()
 				}
 			}
 		}
-	return 1;	
+	}
+	return 1;
 }
 
 int fs_create()
@@ -221,10 +226,10 @@ int fs_delete( int inumber)
 	}
 
 	int blocknum = (inumber - 1)/INODES_PER_BLOCK + 1;
-	int inodenum = (inumber - 1) % INODES_PER_BLOCK;
+	int offset = (inumber - 1) % INODES_PER_BLOCK;
 	union fs_block block;
 	disk_read(blocknum, block.data);
-	struct fs_inode inode = block.inode[inodenum];
+	struct fs_inode inode = block.inode[offset];
 
 	if(inode.isvalid){
 		int fileblocks = inode.size/BLOCK_SIZE + ((inode.size%BLOCK_SIZE == 0)?0:1);
@@ -254,10 +259,6 @@ int fs_delete( int inumber)
 
 int fs_getsize( int inumber )
 {
-	if(bitmap == NULL){
-		printf("The disk haven't been mounted!\n");
-		return -1;
-	}
 	union fs_block superblock;
 	disk_read(0, superblock.data);	
 	if(inumber > superblock.super.ninodes || inumber == 0){
@@ -280,16 +281,32 @@ int fs_getsize( int inumber )
 
 int fs_read( int inumber, char *data, int length, int offset )
 {	
+	if(bitmap == NULL){
+		printf("The disk haven't been mounted!\n");
+		return -1;
+	}
+	union fs_block superblock;
+	disk_read(0, superblock.data);	
+	if(inumber > superblock.super.ninodes || inumber == 0){
+		printf("The inumber is invalid!\n");
+		return 0;
+	}
 	int blocknum = (inumber - 1) /INODES_PER_BLOCK + 1;
 	int inodenum = (inumber -1) % INODES_PER_BLOCK;
 	union fs_block block;
 
-	printf("copy started : %s", data);
+	/*
+	//test
+	union fs_block blocktest;
+	disk_read(blocknum, blocktest.data);
+	struct fs_inode inodetemp = blocktest.inode[inodenum];
+	union fs_block datablocktest;
+	disk_read(inodetemp.direct[0], datablocktest.data);
+	printf("read test: %s\n", datablocktest.data);
+	*/
 
 	disk_read(0,block.data);
 	if(block.super.magic == FS_MAGIC){
-		if(bitmap == NULL)
-			build_bitmap();
 		union fs_block block;
 		disk_read(blocknum, block.data);
 		struct fs_inode inode = block.inode[inodenum];
@@ -309,14 +326,17 @@ int fs_read( int inumber, char *data, int length, int offset )
 				if(last != 0){
 					datablocknum++;
 				}
+
 				//copy the first number
+			printf("length %d \t offset %d \t copysize %d\n", length, offset, copysize);
 				union fs_block datablock;
-				if(blockbegin > POINTERS_PER_INODE)
+				if(blockbegin < POINTERS_PER_INODE){
 					disk_read(inode.direct[blockbegin], datablock.data);
+				}
 				else{
 					int tempblocknum = indirect.pointers[blockbegin - POINTERS_PER_INODE];
 					disk_read(tempblocknum, datablock.data);
-				}	
+				}
 				memcpy(data, datablock.data, first_length);
 				
 				//copy rest blocks
@@ -338,8 +358,10 @@ int fs_read( int inumber, char *data, int length, int offset )
 }
 
 int findFree(){
-	if(bitmap == NULL)
-		build_bitmap();
+	if(bitmap == NULL){
+		printf("The disk haven't been mounted!\n");
+		return -1;
+	}
 	union fs_block block;
 	disk_read(0, block.data);
 	int nblocks = block.super.nblocks;
@@ -355,6 +377,17 @@ int findFree(){
 
 int fs_write( int inumber, const char *data, int length, int offset )
 {
+	if(bitmap == NULL){
+		printf("The disk haven't been mounted!\n");
+		return -1;
+	}
+	union fs_block superblock;
+	disk_read(0, superblock.data);	
+	if(inumber > superblock.super.ninodes || inumber == 0){
+		printf("The inumber is invalid!\n");
+		return 0;
+	}
+
 	int blocknum = (inumber - 1) /INODES_PER_BLOCK + 1;
 	int inodenum = (inumber -1)%INODES_PER_BLOCK;
 	union fs_block block;
@@ -362,8 +395,6 @@ int fs_write( int inumber, const char *data, int length, int offset )
 
 	disk_read(0,block.data);
 	if(block.super.magic == FS_MAGIC){
-		if(bitmap == NULL)
-			build_bitmap();
 		union fs_block block;
 		disk_read(blocknum, block.data);
 		struct fs_inode inode = block.inode[inodenum];
@@ -388,6 +419,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 					inode.direct[i] = freeblock;
 				}
 			}
+			printf("length %d \t offset %d \t copysize %d\n", length, offset, copysize);
 			
 			int extrablock = datablocknum + blockbegin + 1 - POINTERS_PER_INODE;
 			// allocate indirect pointer
@@ -431,8 +463,11 @@ int fs_write( int inumber, const char *data, int length, int offset )
 			}
 
 			if(tempblocknum == 0){
+				block.inode[inodenum].size += ret;
+				disk_write(blocknum, block.data);
 				return ret;
 			}
+			printf("length %d \t offset %d \t copysize %d\n", length, offset, copysize);
 			
 			disk_read(tempblocknum, datablock.data);
 			memcpy(datablock.data + blockoffset, data, first_length);
@@ -441,14 +476,22 @@ int fs_write( int inumber, const char *data, int length, int offset )
 
 			//write the rest block
 			for(int i = 0; i < datablocknum; i++){
+			printf("length %d \t offset %d \t copysize %d\n", length, offset, copysize);
 				if(blockbegin + i < POINTERS_PER_INODE){
-					if(inode.direct[blockbegin + i] == 0)
+					if(inode.direct[blockbegin + i] == 0){
+						block.inode[inodenum].size += ret;
+						disk_write(blocknum, block.data);
 						return ret;
+					}
 					disk_write(inode.direct[blockbegin + i], data+first_length + BLOCK_SIZE*(i-1));
 				}else{
 					int tempblocknum = indirect.pointers[blockbegin + i - POINTERS_PER_INODE];
-					if(tempblocknum == 0)
+					if(tempblocknum == 0){
+						block.inode[inodenum].size += ret;
+						disk_write(blocknum, block.data);
 						return ret;
+					}
+			printf("length %d \t offset %d \t copysize %d\n", length, offset, copysize);
 					disk_write(tempblocknum, data + first_length + BLOCK_SIZE*(i-1));
 				}
 				ret += BLOCK_SIZE;
@@ -458,30 +501,39 @@ int fs_write( int inumber, const char *data, int length, int offset )
 				union fs_block tempblock;
 				
 				if(blockbegin + datablocknum < POINTERS_PER_INODE){
-					if(inode.direct[blockbegin + datablocknum] == 0)
+					if(inode.direct[blockbegin + datablocknum] == 0){
+						block.inode[inodenum].size += ret;
+						disk_write(blocknum, block.data);
 						return ret;
+					}
 					disk_read(inode.direct[blockbegin+datablocknum], tempblock.data);
 					memcpy(tempblock.data, data + first_length + BLOCK_SIZE * datablocknum, last);
 					disk_write(inode.direct[blockbegin + datablocknum], tempblock.data);
 				}else{
 					int tempblocknum = indirect.pointers[blockbegin + datablocknum - POINTERS_PER_INODE];
-					if(tempblocknum == 0)
+					if(tempblocknum == 0){
+						block.inode[inodenum].size += ret;
+						disk_write(blocknum, block.data);
 						return ret;
+					}
 					memcpy(tempblock.data, data + first_length + BLOCK_SIZE * datablocknum, last);
 					disk_write(tempblocknum, tempblock.data);
 				}
 				ret += last;
 				
 			}
-/*
+			block.inode[inodenum].size += ret;
+			disk_write(blocknum, block.data);
+			/*
 			//test
 			union fs_block blocktest;
+			printf("length %d \t offset %d \t copysize %d\n", length, offset, copysize);
 			disk_read(blocknum, blocktest.data);
-			struct fs_inode inodetemp = block.inode[inodenum];
+			struct fs_inode inodetemp = blocktest.inode[inodenum];
 			union fs_block datablocktest;
-			disk_read(inode.direct[0], datablocktest.data);
-			printf("test: %s", datablocktest.data);
-*/
+			disk_read(inodetemp.direct[0], datablocktest.data);
+			printf("test: %s\n", datablocktest.data);
+			*/
 		}
 	}
 	return ret;
