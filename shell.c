@@ -162,7 +162,7 @@ int main( int argc, char *argv[] )
 	}
 
 	printf("closing emulated disk.\n");
-	disk_close();
+	//disk_close();
 
 	return 0;
 }
@@ -198,7 +198,7 @@ static int do_copyin( const char *filename, int inumber )
 
 	printf("%d bytes copied\n",offset);
 
-	//fclose(file);
+	fclose(file);
 	return 1;
 }
 
@@ -223,6 +223,6 @@ static int do_copyout( int inumber, const char *filename )
 
 	printf("%d bytes copied\n",offset);
 
-	//fclose(file);
+	fclose(file);
 	return 1;
 }

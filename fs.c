@@ -14,9 +14,11 @@
 #define BLOCK_SIZE 4096
 #define FREE 0
 #define TAKEN 1
+#define MAX 1024 * 1024
 
+//int *bitmap = NULL; //initialized when mount
 
-int *bitmap = NULL; //initialized when mount
+int bitmap[MAX];
 
 int built = 0;
 int copysize;
@@ -48,7 +50,8 @@ int fs_format()
 {
 	//return fail if already mounted
 	
-	if(bitmap != NULL){
+	//if(bitmap != NULL){
+	if(built == 1){
 		printf("disk is already mounted\n");
 		return 0;
 	}
@@ -140,26 +143,38 @@ void fs_debug()
 			printf("\n");	
 		}
 	}
+	/*
+	union fs_block tempblock;
+
+	disk_read(0,tempblock.data);
+	printf("display bitmap\n");
+	printf("ninodes %d", tempblock.super.ninodes);
+	for(int i = 0; i < tempblock.super.ninodes; i++){
+		printf("%d", bitmap[i]);
+	}
+	printf("\n\n");
+	*/
 }
 
 //build a new free block bitmap
 int fs_mount()
 {
-	if(bitmap != NULL){
+	//if(bitmap != NULL){
+	if(built == 1){
 		printf("It has already been mounted!\n");
 		return 0;
 	}
 	union fs_block block;
 	disk_read(0,block.data);
 	int ninodeblocks = block.super.ninodeblocks;
-	int nblocks = block.super.nblocks;
 	int i,j,k;
 	int fileblocks; // file_size/block_size
 	struct fs_inode inode;
 	union fs_block datablock;
-	bitmap = (int *)malloc(nblocks);
-	memset(bitmap,0,nblocks);
+	//bitmap = (int *)malloc(nblocks * sizeof(int));
+	memset(bitmap,0,MAX * sizeof(int));
 	bitmap[0] = TAKEN;
+	built = 1;
 	for(i = 1; i <= ninodeblocks; i++){
 		bitmap[i] = TAKEN;
 		disk_read(i,block.data);
@@ -187,7 +202,8 @@ int fs_mount()
 
 int fs_create()
 {
-	if(bitmap == NULL){
+	//if(bitmap == NULL){
+	if(built == 0){
 		printf("The disk haven't been mounted!\n");
 		return -1;
 	}
@@ -203,7 +219,6 @@ int fs_create()
 				tempblock.inode[j].size = 0;
 				disk_write(i+1, tempblock.data);
 				disk_write(0, block.data);
-				printf("create with an inumber of : %d", i*INODES_PER_BLOCK + j + 1);
 				return i * INODES_PER_BLOCK + j + 1;
 			}
 		}
@@ -213,7 +228,8 @@ int fs_create()
 
 int fs_delete( int inumber)
 {
-	if(bitmap == NULL){
+	//if(bitmap == NULL){
+	if(built == 0){
 		printf("The disk haven't been mounted!\n");
 		return 0;
 	}
@@ -282,7 +298,8 @@ int fs_getsize( int inumber )
 
 int fs_read( int inumber, char *data, int length, int offset )
 {	
-	if(bitmap == NULL){
+	//if(bitmap == NULL){
+	if(built == 0){
 		printf("The disk haven't been mounted!\n");
 		return -1;
 	}
@@ -312,9 +329,6 @@ int fs_read( int inumber, char *data, int length, int offset )
 		disk_read(blocknum, block.data);
 		struct fs_inode inode = block.inode[inodenum];
 		if(inode.isvalid){
-			//check if input is valid
-			if(inode.size < offset)
-				return 0;
 			int copysize = (inode.size - offset  < length) ? inode.size - offset : length;
 			if(copysize > 0){
 				union fs_block indirect;
@@ -370,7 +384,8 @@ int fs_read( int inumber, char *data, int length, int offset )
 }
 
 int findFree(){
-	if(bitmap == NULL){
+	//if(bitmap == NULL){
+	if(built == 0){
 		printf("The disk haven't been mounted!\n");
 		return -1;
 	}
@@ -390,8 +405,9 @@ int findFree(){
 int fs_write( int inumber, const char *data, int length, int offset )
 {
 	printf("enter write\n");
-	printf("length %d, /t offset %d\n", length, offset);
-	if(bitmap == NULL){
+	printf("length %d, \t offset %d \n", length, offset);
+	//if(bitmap == NULL){
+	if(built == 0){
 		printf("The disk haven't been mounted!\n");
 		return -1;
 	}
@@ -413,9 +429,6 @@ int fs_write( int inumber, const char *data, int length, int offset )
 		disk_read(blocknum, block.data);
 		struct fs_inode inode = block.inode[inodenum];
 		if(inode.isvalid){
-			//check the input
-			if(inode.size < offset)
-				return ret;
 			int blockbegin = offset / BLOCK_SIZE;
 			int blockoffset = offset % BLOCK_SIZE;
 			int datablocknum = (length > (BLOCK_SIZE - offset))?(length - (BLOCK_SIZE - blockoffset)) / BLOCK_SIZE : 0;
@@ -428,6 +441,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 					continue;
 				int freeblock = findFree();
 				if(freeblock != -1){
+					//printf("allocate direct block #%d\n", freeblock);
 					bitmap[freeblock] = TAKEN;
 					inode.direct[i] = freeblock;
 				}
@@ -438,6 +452,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 			if(extrablock > 0 && inode.indirect == 0){
 				int freeblock = findFree();
 				if(freeblock != -1){
+					//printf("allocate indirect bit\n");
 					bitmap[freeblock] = TAKEN;
 					inode.indirect = freeblock;
 				}
@@ -451,6 +466,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 						continue;
 					int tempfree = findFree();
 					if(tempfree != -1){
+						//printf("allocate indirect block #%d\n", tempfree);
 						bitmap[tempfree] = TAKEN;
 						indirect.pointers[k] = tempfree;
 					}else{
