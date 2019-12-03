@@ -203,6 +203,7 @@ int fs_create()
 				tempblock.inode[j].size = 0;
 				disk_write(i+1, tempblock.data);
 				disk_write(0, block.data);
+				printf("create with an inumber of : %d", i*INODES_PER_BLOCK + j + 1);
 				return i * INODES_PER_BLOCK + j + 1;
 			}
 		}
@@ -251,7 +252,6 @@ int fs_delete( int inumber)
 		memset(block.inode[offset].direct, 0, POINTERS_PER_INODE * 4);
 		block.inode[offset].indirect = 0;
 		disk_write(blocknum, block.data);
-		superblock.super.ninodes--;
 		disk_write(0, superblock.data);
 	}
 	return 1;
@@ -321,15 +321,12 @@ int fs_read( int inumber, char *data, int length, int offset )
 				disk_read(inode.indirect, indirect.data);
 				int blockbegin = offset / BLOCK_SIZE;
 				int blockoffset = offset % BLOCK_SIZE;
-				int datablocknum = (copysize > (BLOCK_SIZE - offset)) ? (copysize - (BLOCK_SIZE - offset)) / BLOCK_SIZE : 0;
+				int datablocknum = (copysize > (BLOCK_SIZE - offset)) ? (copysize - (BLOCK_SIZE - blockoffset)) / BLOCK_SIZE : 0;
 				int first_length = (copysize > BLOCK_SIZE - blockoffset) ? BLOCK_SIZE - blockoffset : copysize;	
 				int last = (copysize > first_length)?(copysize - first_length) % BLOCK_SIZE : 0;
-				if(last != 0){
-					datablocknum++;
-				}
 
 				//copy the first number
-			printf("length %d \t offset %d \t copysize %d\n", length, offset, copysize);
+				//printf("length %d \t offset %d \t copysize %d, \tfirst length %d \t last %d\n", length, offset, copysize, first_length, last);
 				union fs_block datablock;
 				if(blockbegin < POINTERS_PER_INODE){
 					disk_read(inode.direct[blockbegin], datablock.data);
@@ -339,9 +336,10 @@ int fs_read( int inumber, char *data, int length, int offset )
 					disk_read(tempblocknum, datablock.data);
 				}
 				memcpy(data, datablock.data, first_length);
-				
+			
+				//printf("first block complete, datablock number:%d\n", datablocknum);
 				//copy rest blocks
-				for(int i = 1; i < datablocknum; i++){
+				for(int i = 1; i <= datablocknum; i++){
 					union fs_block tempblock;
 					if(blockbegin + i < POINTERS_PER_INODE){
 						disk_read(inode.direct[blockbegin + i], tempblock.data);
@@ -350,6 +348,19 @@ int fs_read( int inumber, char *data, int length, int offset )
 						disk_read(tempblocknum, tempblock.data);
 					}
 					memcpy(data + first_length + BLOCK_SIZE * (i-1), tempblock.data, BLOCK_SIZE);
+				}
+
+				if(last != 0){
+					//printf("copy last block\n");
+					union fs_block tempblock;
+					if(blockbegin + datablocknum + 1 < POINTERS_PER_INODE){
+						disk_read(inode.direct[blockbegin + datablocknum + 1], tempblock.data);
+					}else{
+						int tempblocknum = indirect.pointers[blockbegin + datablocknum + 1 - POINTERS_PER_INODE];
+						disk_read(tempblocknum, tempblock.data);
+					}
+					memcpy(data + first_length + BLOCK_SIZE * datablocknum, tempblock.data, BLOCK_SIZE);
+					//printf("last block copy complete\n");
 				}
 			}
 			return copysize;
@@ -378,6 +389,7 @@ int findFree(){
 
 int fs_write( int inumber, const char *data, int length, int offset )
 {
+	printf("enter write\n");
 	if(bitmap == NULL){
 		printf("The disk haven't been mounted!\n");
 		return -1;
@@ -405,7 +417,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 				return ret;
 			int blockbegin = offset / BLOCK_SIZE;
 			int blockoffset = offset % BLOCK_SIZE;
-			int datablocknum = (length > (BLOCK_SIZE - offset))?(length - (BLOCK_SIZE - offset)) / BLOCK_SIZE : 0;
+			int datablocknum = (length > (BLOCK_SIZE - offset))?(length - (BLOCK_SIZE - blockoffset)) / BLOCK_SIZE : 0;
 			int first_length = (length > BLOCK_SIZE - blockoffset) ? BLOCK_SIZE - blockoffset : length;	
 			int last = (first_length < length)?(length - first_length) % BLOCK_SIZE : 0;
 	
@@ -473,7 +485,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 			ret += first_length;
 
 			//write the rest block
-			for(int i = 0; i < datablocknum; i++){
+			for(int i = 1; i <= datablocknum; i++){
 				if(blockbegin + i < POINTERS_PER_INODE){
 					if(inode.direct[blockbegin + i] == 0){
 						block.inode[inodenum].size += ret;
