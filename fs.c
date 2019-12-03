@@ -19,6 +19,7 @@
 int *bitmap = NULL; //initialized when mount
 
 int built = 0;
+int copysize;
 
 struct fs_superblock {
 	int magic;
@@ -41,50 +42,13 @@ union fs_block {
 	char data[DISK_BLOCK_SIZE];
 };
 
-void build_bitmap(){
-	built = 1;
-	union fs_block block;
-	disk_read(0,block.data);
-	int ninodeblocks = block.super.ninodeblocks;
-	int nblocks = block.super.nblocks;
-	int i,j,k;
-	int fileblocks; // file_size/block_size
-	struct fs_inode inode;
-	union fs_block datablock;
-	bitmap = (int *)malloc(nblocks * sizeof(int));
-	memset(bitmap,0,nblocks);
-	bitmap[0] = TAKEN;
-	for(i = 1; i <= ninodeblocks; i++){
-		bitmap[i] = TAKEN;
-		disk_read(i,block.data);
-		for(j = 0; j < INODES_PER_BLOCK; j++){
-			inode = block.inode[j];
-			if(inode.isvalid){
-				fileblocks = inode.size / BLOCK_SIZE;
-				if(inode.size % BLOCK_SIZE){
-					fileblocks++;
-				}
-				for(k = 0; k < POINTERS_PER_INODE; k++){
-					bitmap[inode.direct[k]] = TAKEN;
-				}
-				if(fileblocks > POINTERS_PER_INODE){
-					disk_read(inode.indirect,datablock.data);
-					for(k = 0; k < (fileblocks-POINTERS_PER_INODE); k++){
-						bitmap[datablock.pointers[k]] = TAKEN;
-					}
-				}
-			}
-		}
-	}
-}
 
 //an attempt to format an already-mounted disk should do nothing and return failure
 int fs_format()
 {
 	//return fail if already mounted
-	union fs_block superblock;
-	disk_read(0,superblock.data);
-	if(superblock.super.magic == FS_MAGIC){
+	
+	if(bitmap != NULL){
 		printf("disk is already mounted\n");
 		return 0;
 	}
@@ -97,15 +61,17 @@ int fs_format()
 	//set nblocks
 	data.super.nblocks = nblocks;
 	//set ninode block
-	int inodes = (int)(nblocks*0.1) + ((nblocks%10 == 0) ? 0 : 1);
-	data.super.ninodeblocks = inodes;
-	data.super.ninodes = 0;
+	int inodesblocks = (int)(nblocks*0.1) + ((nblocks%10 == 0) ? 0 : 1);
+	data.super.ninodeblocks = inodesblocks;
+	data.super.ninodes = inodesblocks * INODES_PER_BLOCK;
+	data.super.magic = FS_MAGIC;
+	//printf("in format: ninodesblocks: %d ninodes: %d\n",data.super.ninodeblocks, data.super.ninodes);
 	disk_write(0, data.data);
 
 	//set aside ten percent blocks as inode block
 	// bit map should obey the rule that the first block is for super block
 	//and the first 10% blocks are used for inodes
-	for(int i = 0; i < inodes - 1; i++){
+	for(int i = 0; i < inodesblocks - 1; i++){
 		union fs_block block;
 		for(int j = 0; j < INODES_PER_BLOCK; j++){
 			block.inode[j].isvalid = 0;
@@ -137,7 +103,7 @@ void fs_debug()
 	}
 	printf("    %d blocks on disk\n",block.super.nblocks);
 	printf("    %d blocks for inodes\n",block.super.ninodeblocks);
-	printf("    %d inodes toal\n",block.super.ninodes);
+	printf("    %d inodes total\n",block.super.ninodes);
 
 	int ninodeblocks = block.super.ninodeblocks;
 	if (ninodeblocks < 0){return;}
@@ -179,30 +145,55 @@ void fs_debug()
 //build a new free block bitmap
 int fs_mount()
 {
+	if(bitmap != NULL){
+		printf("It has already been mounted!\n");
+		return 0;
+	}
 	union fs_block block;
 	disk_read(0,block.data);
-	if(block.super.magic != FS_MAGIC){
-		int nblocks = block.super.nblocks;		
-		bitmap = (int *)malloc(nblocks * sizeof(int));
-		memset(bitmap,0,nblocks);
-		block.super.magic = FS_MAGIC;
-		disk_write(0, block.data);
-		return 1;
+	int ninodeblocks = block.super.ninodeblocks;
+	int nblocks = block.super.nblocks;
+	int i,j,k;
+	int fileblocks; // file_size/block_size
+	struct fs_inode inode;
+	union fs_block datablock;
+	bitmap = (int *)malloc(nblocks);
+	memset(bitmap,0,nblocks);
+	bitmap[0] = TAKEN;
+	for(i = 1; i <= ninodeblocks; i++){
+		bitmap[i] = TAKEN;
+		disk_read(i,block.data);
+		for(j = 0; j < INODES_PER_BLOCK; j++){
+			inode = block.inode[j];
+			if(inode.isvalid){
+				fileblocks = inode.size / BLOCK_SIZE;
+				if(inode.size % BLOCK_SIZE){
+					fileblocks++;
+				}
+				for(k = 0; k < POINTERS_PER_INODE; k++){
+					bitmap[inode.direct[k]] = TAKEN;
+				}
+				if(fileblocks > POINTERS_PER_INODE){
+					disk_read(inode.indirect,datablock.data);
+					for(k = 0; k < (fileblocks - POINTERS_PER_INODE); k++){
+						bitmap[datablock.pointers[k]] = TAKEN;
+					}
+				}
+			}
+		}
 	}
-	printf("It has already been mounted!\n");
-	return 0;
+	return 1;
 }
 
 int fs_create()
 {
+	if(bitmap == NULL){
+		printf("The disk haven't been mounted!\n");
+		return -1;
+	}
 	// search through the top 10% blocks finding the first avalible inode
 	union fs_block block;
 	disk_read(0, block.data);
-	if(block.super.magic != FS_MAGIC){
-		return -1;
-	}
-	if(built == 0)
-		build_bitmap();
 	for(int i = 0; i < block.super.ninodeblocks; i++){
 		union fs_block tempblock;
 		disk_read(i+1, tempblock.data);
@@ -211,8 +202,6 @@ int fs_create()
 				tempblock.inode[j].isvalid = 1;
 				tempblock.inode[j].size = 0;
 				disk_write(i+1, tempblock.data);
-				// update the total number of inodes
-				block.super.ninodes++;
 				disk_write(0, block.data);
 				return i * INODES_PER_BLOCK + j + 1;
 			}
@@ -223,24 +212,24 @@ int fs_create()
 
 int fs_delete( int inumber)
 {
-	int blocknum = (inumber - 1) / INODES_PER_BLOCK + 1;
-	int offset = (inumber-1) % INODES_PER_BLOCK;
-	
-	//check if the input inumber if valid
-	union fs_block superblock;
-	disk_read(0, superblock.data);
-	if(superblock.super.magic != FS_MAGIC ||
-	inumber > superblock.super.ninodes ||
-	inumber == 0){
+	if(bitmap == NULL){
+		printf("The disk haven't been mounted!\n");
 		return 0;
 	}
-	if(built == 0)
-		build_bitmap();
+	//check if the input inumber if valid
+	union fs_block superblock;
+	disk_read(0, superblock.data);	
+	if(inumber > superblock.super.ninodes || inumber == 0){
+		printf("The inumber is invalid!\n");
+		return 0;
+	}
 
-	//get corresponding inode
+	int blocknum = (inumber - 1)/INODES_PER_BLOCK + 1;
+	int offset = (inumber - 1) % INODES_PER_BLOCK;
 	union fs_block block;
 	disk_read(blocknum, block.data);
 	struct fs_inode inode = block.inode[offset];
+
 	if(inode.isvalid){
 		int fileblocks = inode.size/BLOCK_SIZE + ((inode.size%BLOCK_SIZE == 0)?0:1);
 		for(int i = 0; i < POINTERS_PER_INODE; i++){
@@ -271,35 +260,40 @@ int fs_delete( int inumber)
 
 int fs_getsize( int inumber )
 {
+	union fs_block superblock;
+	disk_read(0, superblock.data);	
+	if(inumber > superblock.super.ninodes || inumber == 0){
+		printf("The inumber is invalid!\n");
+		return 0;
+	}
+
 	int blocknum = (inumber - 1) /INODES_PER_BLOCK + 1;
 	int inodenum = (inumber -1)%INODES_PER_BLOCK;
 	union fs_block block;
-
-	disk_read(0,block.data);
-	if (block.super.magic != FS_MAGIC){
-		printf("Please enter a number within 1 ~ ninodes!");
-		return -1;
-	}
-	if(built == 0)
-		build_bitmap();
-	
-	// read a inode
 	disk_read(blocknum, block.data);
-	if(block.inode[inodenum].isvalid == 0){
+	struct fs_inode inode = block.inode[inodenum];
+	if(inode.isvalid == 0){
 		printf("inumber is not valid. Not create yet.\n");
 		return -1;
-	}
-	struct fs_inode inode = block.inode[inodenum];	
+	}	
 	return inode.size;
-
-	//return -1;
 }
 
 
 int fs_read( int inumber, char *data, int length, int offset )
 {	
+	if(bitmap == NULL){
+		printf("The disk haven't been mounted!\n");
+		return -1;
+	}
+	union fs_block superblock;
+	disk_read(0, superblock.data);	
+	if(inumber > superblock.super.ninodes || inumber == 0){
+		printf("The inumber is invalid!\n");
+		return 0;
+	}
 	int blocknum = (inumber - 1) /INODES_PER_BLOCK + 1;
-	int inodenum = (inumber -1)%INODES_PER_BLOCK;
+	int inodenum = (inumber -1) % INODES_PER_BLOCK;
 	union fs_block block;
 
 	/*
@@ -314,8 +308,6 @@ int fs_read( int inumber, char *data, int length, int offset )
 
 	disk_read(0,block.data);
 	if(block.super.magic == FS_MAGIC){
-		if(built == 0)
-			build_bitmap();
 		union fs_block block;
 		disk_read(blocknum, block.data);
 		struct fs_inode inode = block.inode[inodenum];
@@ -367,12 +359,15 @@ int fs_read( int inumber, char *data, int length, int offset )
 }
 
 int findFree(){
-	if(built == 0)
-		build_bitmap();
+	if(bitmap == NULL){
+		printf("The disk haven't been mounted!\n");
+		return -1;
+	}
 	union fs_block block;
 	disk_read(0, block.data);
 	int nblocks = block.super.nblocks;
-	for(int i = 0; i < nblocks; i++){
+	int inodesblocks = block.super.ninodeblocks;
+	for(int i = inodesblocks; i < nblocks; i++){
 		if(bitmap[i] == FREE){
 			return i;
 		}
@@ -383,6 +378,17 @@ int findFree(){
 
 int fs_write( int inumber, const char *data, int length, int offset )
 {
+	if(bitmap == NULL){
+		printf("The disk haven't been mounted!\n");
+		return -1;
+	}
+	union fs_block superblock;
+	disk_read(0, superblock.data);	
+	if(inumber > superblock.super.ninodes || inumber == 0){
+		printf("The inumber is invalid!\n");
+		return 0;
+	}
+
 	int blocknum = (inumber - 1) /INODES_PER_BLOCK + 1;
 	int inodenum = (inumber -1)%INODES_PER_BLOCK;
 	union fs_block block;
@@ -390,8 +396,6 @@ int fs_write( int inumber, const char *data, int length, int offset )
 
 	disk_read(0,block.data);
 	if(block.super.magic == FS_MAGIC){
-		if(built == 0)
-			build_bitmap();
 		union fs_block block;
 		disk_read(blocknum, block.data);
 		struct fs_inode inode = block.inode[inodenum];
