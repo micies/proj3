@@ -390,6 +390,7 @@ int findFree(){
 int fs_write( int inumber, const char *data, int length, int offset )
 {
 	printf("enter write\n");
+	printf("length %d, /t offset %d\n", length, offset);
 	if(bitmap == NULL){
 		printf("The disk haven't been mounted!\n");
 		return -1;
