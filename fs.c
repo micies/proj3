@@ -16,7 +16,8 @@
 #define TAKEN 1
 
 
-int *bitmap = NULL; //initialized when mount
+
+int * bitmap = NULL; //initialized when mount
 
 int built = 0;
 int copysize;
@@ -71,7 +72,7 @@ int fs_format()
 	//set aside ten percent blocks as inode block
 	// bit map should obey the rule that the first block is for super block
 	//and the first 10% blocks are used for inodes
-	for(int i = 0; i < inodesblocks - 1; i++){
+	for(int i = 1; i < inodesblocks; i++){
 		union fs_block block;
 		for(int j = 0; j < INODES_PER_BLOCK; j++){
 			block.inode[j].isvalid = 0;
@@ -80,7 +81,7 @@ int fs_format()
 			memset(block.inode[j].direct, 0, POINTERS_PER_INODE * 4);
 			block.inode[j].indirect = 0;
 		}
-		disk_write(i+1, block.data);
+		disk_write(i, block.data);
 	}
 
 	//block.super.ninodeblocks
@@ -107,8 +108,8 @@ void fs_debug()
 
 	int ninodeblocks = block.super.ninodeblocks;
 	if (ninodeblocks < 0){return;}
-	for (int i = 0; i< ninodeblocks; i++){ // each inode block
-		disk_read(i+1,block.data);
+	for (int i = 1; i< ninodeblocks; i++){ // each inode block
+		disk_read(i,block.data);
 		for (int j = 0; j < INODES_PER_BLOCK; j++){ // each inode
 			struct fs_inode inode = block.inode[j];
 			if (!inode.isvalid){
@@ -211,7 +212,7 @@ int fs_create()
 	return -1;
 }
 
-int fs_delete( int inumber)
+int fs_delete(int inumber)
 {
 	if(bitmap == NULL){
 		printf("The disk haven't been mounted!\n");
@@ -227,7 +228,7 @@ int fs_delete( int inumber)
 
 	int blocknum = (inumber - 1) /INODES_PER_BLOCK + 1;
 	int inodenum = (inumber - 1) %INODES_PER_BLOCK;
-	union fs_block block;
+	union fs_block block;	
 	disk_read(blocknum, block.data);
 	struct fs_inode inode = block.inode[inodenum];
 
@@ -276,7 +277,9 @@ int fs_getsize( int inumber )
 		printf("inumber is not valid. Not create yet.\n");
 		return -1;
 	}	
+	//printf("%d\n", inode.size);
 	return inode.size;
+
 }
 
 
@@ -296,15 +299,7 @@ int fs_read( int inumber, char *data, int length, int offset )
 	int inodenum = (inumber - 1) %INODES_PER_BLOCK;
 	union fs_block block;
 
-	/*
-	//test
-	union fs_block blocktest;
-	disk_read(blocknum, blocktest.data);
-	struct fs_inode inodetemp = blocktest.inode[inodenum];
-	union fs_block datablocktest;
-	disk_read(inodetemp.direct[0], datablocktest.data);
-	printf("read test: %s\n", datablocktest.data);
-	*/
+
 
 	disk_read(0,block.data);
 	if(block.super.magic == FS_MAGIC){
@@ -313,7 +308,7 @@ int fs_read( int inumber, char *data, int length, int offset )
 		struct fs_inode inode = block.inode[inodenum];
 		if(inode.isvalid){
 			//check if input is valid
-			if(inode.size < offset)
+			if(inode.size < offset) 
 				return 0;
 			int copysize = (inode.size - offset  < length) ? inode.size - offset : length;
 			if(copysize > 0){
@@ -533,16 +528,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 			}
 			block.inode[inodenum].size += ret;
 			disk_write(blocknum, block.data);
-			/*
-			//test
-			union fs_block blocktest;
-			printf("length %d \t offset %d \t copysize %d\n", length, offset, copysize);
-			disk_read(blocknum, blocktest.data);
-			struct fs_inode inodetemp = blocktest.inode[inodenum];
-			union fs_block datablocktest;
-			disk_read(inodetemp.direct[0], datablocktest.data);
-			printf("test: %s\n", datablocktest.data);
-			*/
+
 		}
 	}
 	return ret;

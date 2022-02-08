@@ -145,11 +145,13 @@ int main( int argc, char *argv[] )
 			printf("    create\n");
 			printf("    delete  <inode>\n");
 			printf("    cat     <inode>\n");
+			printf("    getsize <inode> \n");
 			printf("    copyin  <file> <inode>\n");
 			printf("    copyout <inode> <file>\n");
 			printf("    help\n");
 			printf("    quit\n");
 			printf("    exit\n");
+
 		} else if(!strcmp(cmd,"quit")) {
 			break;
 		} else if(!strcmp(cmd,"exit")) {
