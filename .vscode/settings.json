@@ -1,0 +1,7 @@
+{
+    "gitlab.repositories": {
+        "/home/alan/project_perfect/proj3": {
+            "preferredRemoteName": "origin"
+        }
+    }
+}
